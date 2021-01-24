@@ -1,4 +1,4 @@
-# Using AWS DevOps Tools to model and provision AWS Glue workflows
+## Using AWS DevOps Tools to model and provision AWS Glue workflows
 
 [Using AWS DevOps Tools to model and provision AWS Glue workflows](https://aws.amazon.com/blogs/devops/provision-codepipeline-glue-workflows).
 
