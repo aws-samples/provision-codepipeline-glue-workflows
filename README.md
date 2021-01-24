@@ -1,6 +1,11 @@
 # Using AWS DevOps Tools to model and provision AWS Glue workflows
 
-Git repo to accompany the AWS DevOps Blog: [Using AWS DevOps Tools to model and provision AWS Glue workflows](https://aws.amazon.com/blogs/devops/provision-codepipeline-glue-workflows).
+Git repo to accompany the AWS DevOps Blog:
+[Using AWS DevOps Tools to model and provision AWS Glue workflows](https://aws.amazon.com/blogs/devops/provision-codepipeline-glue-workflows).
+
+This post provides a step-by-step guide on how to model and provision AWS Glue workflows utilizing a DevOps principle known as infrastructure as code (IaC) that emphasizes the use of templates, source control, and automation. The cloud resources in this solution are defined within AWS CloudFormation templates and provisioned with automation features provided by AWS CodePipeline and AWS CodeBuild. These AWS DevOps tools are flexible, interchangeable, and well suited for automating the deployment of AWS Glue workflows into different environments such as dev, test, and production, which typically reside in separate AWS accounts and Regions.
+
+AWS Glue workflows allow you to manage dependencies between multiple components that interoperate within an end-to-end ETL data pipeline by grouping together a set of related jobs, crawlers, and triggers into one logical run unit. Many customers using AWS Glue workflows start by defining the pipeline using the AWS Management Console and then move on to monitoring and troubleshooting using either the console, AWS APIs, or the AWS Command Line Interface (AWS CLI).
 
 ## Architecture Diagram
 ![Alt text](images/blog.png?raw=true "Architecture Diagram")
