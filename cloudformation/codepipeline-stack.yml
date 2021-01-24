@@ -1,0 +1,356 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Model and provision AWS CodePipeline and AWS CodeBuild
+
+Parameters:
+  CodePipelineSourceBucketName:
+    Type: String
+    Description: Bucket to store source code
+    Default: covid19-codepipeline-source
+
+  CodePipelineSourceObjectKey:
+    Type: String
+    Description: Object key of zip file uploaded to source bucket
+    Default: source.zip 
+
+  CodePipelineArtifactStoreBucketName:
+    Type: String
+    Description: Bucket to store artifacts created by codepipeline
+    Default: covid19-codepipeline-artifacts
+
+  CloudTrailLogsBucketName:
+    Type: String
+    Description: Bucket to store cloudtrail logs
+    Default: covid19-cloudtrail-logs
+
+Resources:
+  # CodePipeline
+  DeployPipelineForGlueWorkflow: 
+    Type: AWS::CodePipeline::Pipeline
+    Properties: 
+      Name: !Sub DeployPipelineForGlueWorkflow-${AWS::StackName}
+      RoleArn: !GetAtt CodePipelineRole.Arn
+      ArtifactStore: 
+        Type: S3
+        Location: !Ref CodePipelineArtifactStoreBucket
+      Stages: 
+      - 
+        Name: Source
+        Actions: 
+        - 
+          Name: SourceAction
+          ActionTypeId: 
+            Category: Source
+            Owner: AWS
+            Version: "1"
+            Provider: S3
+          OutputArtifacts: 
+            - Name: SourceOutput
+          Configuration: 
+            S3Bucket: !Ref CodePipelineSourceBucket
+            S3ObjectKey: !Ref CodePipelineSourceObjectKey 
+            PollForSourceChanges: false
+          RunOrder: 1
+      -
+        Name: Deploy
+        Actions:
+        -
+          Name: DeployGlueWorkflowStack
+          InputArtifacts:
+            - Name: SourceOutput
+          ActionTypeId:
+            Category: Build
+            Owner: AWS
+            Version: "1"
+            Provider: CodeBuild
+          Configuration:
+            ProjectName: !Ref DeployGlueWorkflowStack
+          RunOrder: 1
+
+  # CodeBuild
+  DeployGlueWorkflowStack:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub DeployGlueWorkflowStack-${AWS::StackName}
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Source:
+        BuildSpec: buildspecs/deploy-glue-workflow-stack.yml
+        Type: CODEPIPELINE
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment: 
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+        Type: LINUX_CONTAINER
+        PrivilegedMode: True
+        EnvironmentVariables:
+          - Name: AWS_ACCOUNT_ID
+            Value: !Ref AWS::AccountId
+      LogsConfig: 
+        CloudWatchLogs:
+          Status: ENABLED
+
+  # CloudTrail (configuring TrailName to match CloudTrailLogsBucketName)
+  CloudTrailLogs:
+    Type: AWS::CloudTrail::Trail
+    DependsOn: CloudTrailLogsBucketPolicy
+    Properties:
+      TrailName: !Ref CloudTrailLogsBucketName
+      S3BucketName: !Ref CloudTrailLogsBucket
+      IsLogging: true
+      IsMultiRegionTrail: false
+      IncludeGlobalServiceEvents: false
+      EventSelectors:
+        - ReadWriteType: WriteOnly
+          DataResources:
+            - Type: AWS::S3::Object
+              Values:
+                - !Sub arn:aws:s3:::${CodePipelineSourceBucketName}-${AWS::AccountId}-${AWS::Region}/${CodePipelineSourceObjectKey}
+
+  # EventBridge Rule (invokes CodePipeline)
+  InvokeCodepipeline:
+    Type: AWS::Events::Rule
+    Properties:
+      State: ENABLED
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - 'AWS API Call via CloudTrail'
+        detail:
+          eventSource:
+            - s3.amazonaws.com
+          eventName:
+            - PutObject
+            - CompleteMultipartUpload
+          resources:
+            ARN:
+              - !Sub arn:aws:s3:::${CodePipelineSourceBucketName}-${AWS::AccountId}-${AWS::Region}/${CodePipelineSourceObjectKey}
+      Targets:
+        - Arn: !Sub arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipelineForGlueWorkflow}
+          RoleArn: !GetAtt InvokeCodepipelineRole.Arn
+          Id: InvokeCodepipeline
+
+  # IAM Roles & Policies
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub CodePipeline-Role-${AWS::StackName}
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Action: sts:AssumeRole
+          Principal:
+            Service: codepipeline.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: !Sub CodePipeline-Policy-${AWS::StackName}
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                  - cloudformation:*
+                  - cloudwatch:*
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - s3:Get*
+                  - s3:Put*
+                Resource:
+                  - !Sub arn:aws:s3:::${CodePipelineSourceBucketName}-${AWS::AccountId}-${AWS::Region}
+                  - !Sub arn:aws:s3:::${CodePipelineSourceBucketName}-${AWS::AccountId}-${AWS::Region}/*
+                  - !Sub arn:aws:s3:::${CodePipelineArtifactStoreBucketName}-${AWS::AccountId}-${AWS::Region}
+                  - !Sub arn:aws:s3:::${CodePipelineArtifactStoreBucketName}-${AWS::AccountId}-${AWS::Region}/*               
+
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub CodeBuild-Role-${AWS::StackName}
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Action: sts:AssumeRole
+          Principal:
+            Service: codebuild.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: !Sub CodeBuild-Policy-${AWS::StackName}
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:*
+                  - cloudwatch:*
+                  - glue:*
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - iam:AttachRolePolicy
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:DeleteRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                  - iam:PassRole
+                  - iam:PutRolePolicy
+                Resource:
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/Covid19Role
+              - Effect: Allow
+                Action:
+                  - s3:CreateBucket
+                  - s3:DeleteBucket
+                  - s3:GetBucketPolicy
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutBucketPolicy
+                  - s3:PutBucketPublicAccessBlock
+                  - s3:PutEncryptionConfiguration
+                  - s3:PutObject
+                  - s3:PutPublicAccessBlock
+                Resource:
+                  - !Sub arn:aws:s3:::${CodePipelineSourceBucketName}-${AWS::AccountId}-${AWS::Region}
+                  - !Sub arn:aws:s3:::${CodePipelineSourceBucketName}-${AWS::AccountId}-${AWS::Region}/*
+                  - !Sub arn:aws:s3:::${CodePipelineArtifactStoreBucketName}-${AWS::AccountId}-${AWS::Region}
+                  - !Sub arn:aws:s3:::${CodePipelineArtifactStoreBucketName}-${AWS::AccountId}-${AWS::Region}/*
+                  - !Sub arn:aws:s3:::covid19-dataset-${AWS::AccountId}-${AWS::Region}
+                  - !Sub arn:aws:s3:::covid19-dataset-${AWS::AccountId}-${AWS::Region}/*
+
+  InvokeCodepipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Action: sts:AssumeRole
+          Principal:
+            Service: events.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: !Sub InvokeCodepipeline-Policy-${AWS::StackName}
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codepipeline:StartPipelineExecution
+                Resource: !Sub arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${DeployPipelineForGlueWorkflow}
+
+  # S3 Buckets & Policies
+  CodePipelineSourceBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      BucketName: !Sub ${CodePipelineSourceBucketName}-${AWS::AccountId}-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+          BlockPublicAcls: TRUE
+          BlockPublicPolicy: TRUE
+          IgnorePublicAcls: TRUE
+          RestrictPublicBuckets: TRUE
+
+  CodePipelineSourceBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CodePipelineSourceBucket
+      PolicyDocument:
+        Statement:
+          - Sid: DenyInsecureConnections
+            Effect: Deny
+            Action: s3:*
+            Principal: "*"
+            Resource:
+              - !Sub arn:aws:s3:::${CodePipelineSourceBucketName}-${AWS::AccountId}-${AWS::Region}
+              - !Sub arn:aws:s3:::${CodePipelineSourceBucketName}-${AWS::AccountId}-${AWS::Region}/*
+            Condition:
+                Bool:
+                  aws:SecureTransport: false
+
+  CodePipelineArtifactStoreBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${CodePipelineArtifactStoreBucketName}-${AWS::AccountId}-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+          BlockPublicAcls: TRUE
+          BlockPublicPolicy: TRUE
+          IgnorePublicAcls: TRUE
+          RestrictPublicBuckets: TRUE
+
+  CodePipelineArtifactStoreBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CodePipelineArtifactStoreBucket
+      PolicyDocument:
+        Statement:
+          - Sid: DenyInsecureConnections
+            Effect: Deny
+            Action:
+              - s3:*
+            Principal: "*"
+            Resource:
+              - !Sub arn:aws:s3:::${CodePipelineArtifactStoreBucketName}-${AWS::AccountId}-${AWS::Region}
+              - !Sub arn:aws:s3:::${CodePipelineArtifactStoreBucketName}-${AWS::AccountId}-${AWS::Region}/*
+            Condition:
+                Bool:
+                  aws:SecureTransport: false
+
+  CloudTrailLogsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${CloudTrailLogsBucketName}-${AWS::AccountId}-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+          BlockPublicAcls: TRUE
+          BlockPublicPolicy: TRUE
+          IgnorePublicAcls: TRUE
+          RestrictPublicBuckets: TRUE
+
+  CloudTrailLogsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CloudTrailLogsBucket
+      PolicyDocument:
+        Statement:
+          - Sid: DenyInsecureConnections
+            Effect: Deny
+            Action:
+              - s3:*
+            Principal: "*"
+            Resource:
+              - !Sub arn:aws:s3:::${CloudTrailLogsBucketName}-${AWS::AccountId}-${AWS::Region}
+              - !Sub arn:aws:s3:::${CloudTrailLogsBucketName}-${AWS::AccountId}-${AWS::Region}/*
+            Condition:
+                Bool:
+                  aws:SecureTransport: false
+          - Sid: AWSCloudTrailAclCheck
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource: !Sub arn:aws:s3:::${CloudTrailLogsBucketName}-${AWS::AccountId}-${AWS::Region}
+          - Sid: AWSCloudTrailWrite
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub arn:aws:s3:::${CloudTrailLogsBucketName}-${AWS::AccountId}-${AWS::Region}/AWSLogs/${AWS::AccountId}/*
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control

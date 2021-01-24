@@ -1,0 +1,24 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.8
+
+  build:
+    commands:
+      - ls -al
+      - aws --version
+      # Deploy stack containing glue workflow.
+      # Leverages the environment variable named $AWS_REGION which is
+      # automatically provided by AWS CodeBuild based on where the build is running.
+      - aws cloudformation deploy --stack-name glue-covid19 --template-file ./cloudformation/glue-workflow-stack.yml --capabilities CAPABILITY_NAMED_IAM --no-fail-on-empty-changeset --region $AWS_REGION
+
+  post_build:
+    commands:
+      # Copy python scripts in src directory to bucket/glue-scripts.
+      # Leverages the environment variable named $AWS_REGION which is
+      # automatically provided by AWS CodeBuild based on where the build is running.
+      # Also leverages the environment variable named $AWS_ACCOUNT_ID provided by
+      # the AWS CodeBuild project defined in codepipeline-stack.yml
+      - aws s3 cp src s3://covid19-dataset-$AWS_ACCOUNT_ID-$AWS_REGION/glue-scripts/ --recursive

@@ -1,0 +1,670 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Using AWS CloudFormation to model and provision AWS Glue Workflows
+
+Parameters:
+  GlueWorkflowName:
+    Type: String
+    Description: Glue workflow that tracks all triggers, jobs, crawlers as a single entity
+    Default: Covid_19
+
+  GlueDatabaseName:
+    Type: String
+    Description: demo-glue-database
+    Default: covid19db
+
+  GlueRoleName:
+    Type: String
+    Description: IAM role for AWS Glue Job
+    Default: Covid19Role
+
+  GlueJobLogLevel:
+    Type: String
+    Description: Parameter referenced by Glue Jobs to control python script log level
+    Default: INFO
+
+  BucketName:
+    Type: String
+    Description: Bucket to store data
+    Default: covid19-dataset
+
+Resources:
+  # Glue Workflow
+  Covid19Workflow:
+    Type: AWS::Glue::Workflow
+    Properties: 
+      Description: Glue workflow that tracks specified triggers, jobs, and crawlers as a single entity
+      Name: !Ref GlueWorkflowName
+
+  # Glue Triggers
+  TriggerJobCovid19WorkflowStart:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: t_Start
+      Type: SCHEDULED
+      Schedule: cron(0 8 * * ? *) # Runs once a day at 8 AM UTC
+      StartOnCreation: true
+      WorkflowName: !Ref GlueWorkflowName
+      Actions:
+        - JobName: !Ref Covid19WorkflowStarted
+
+  TriggerJobCovid19WorkflowEnd:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: t_End
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Ref GlueWorkflowName
+      Actions:
+        - JobName: !Ref Covid19WorkflowEnded
+      Predicate:
+        Conditions:
+          - CrawlerName: !Ref Covid19Aggregated
+            LogicalOperator: EQUALS
+            CrawlState: SUCCEEDED
+
+  TriggerCrawlerAggregated:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: t_Aggregated
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Ref GlueWorkflowName
+      Actions:
+        - CrawlerName: !Ref Covid19Aggregated
+      Predicate:
+        Logical: AND
+        Conditions:
+          - JobName: !Ref Covid19AggregatorMonthly
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+          - JobName: !Ref Covid19AggregatorQuarterly
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+
+  TriggerCrawlersGroupA:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: t_GroupA
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Ref GlueWorkflowName
+      Actions:
+        - CrawlerName: !Ref CountyPopulation
+        - CrawlerName: !Ref Countrycode
+      Predicate:
+        Conditions:
+          - JobName: !Ref Covid19WorkflowStarted
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+
+  TriggerCrawlersGroupB:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: t_GroupB
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Ref GlueWorkflowName
+      Actions:
+        - CrawlerName: !Ref RearcCovid19NytDataInUsaUsCounties
+        - CrawlerName: !Ref RearcCovid19NytDataInUsaUsStates
+      Predicate:
+        Conditions:
+          - JobName: !Ref Covid19WorkflowStarted
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+
+  TriggerCrawlersGroupC:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: t_GroupC
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Ref GlueWorkflowName
+      Actions:
+        - CrawlerName: !Ref RearcCovid19TestingDataStatesDaily
+        - CrawlerName: !Ref RearcCovid19TestingDataUsDaily
+      Predicate:
+        Conditions:
+          - JobName: !Ref Covid19WorkflowStarted
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+
+  TriggerCrawlersGroupD:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: t_GroupD
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Ref GlueWorkflowName
+      Actions:
+        - CrawlerName: !Ref RearcCovid19TestingDataUsTotalLatest
+        - CrawlerName: !Ref RearcCovid19WorldCasesDeathsTesting
+      Predicate:
+        Conditions:
+          - JobName: !Ref Covid19WorkflowStarted
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+
+  TriggerCrawlersGroupE:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: t_GroupE
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Ref GlueWorkflowName
+      Actions:
+        - CrawlerName: !Ref RearcUsaHospitalBeds
+        - CrawlerName: !Ref StateAbv
+      Predicate:
+        Conditions:
+          - JobName: !Ref Covid19WorkflowStarted
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+
+  TriggerJobAggregateMonth:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: t_Month
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Ref GlueWorkflowName
+      Actions:
+        - JobName: !Ref Covid19AggregatorMonthly
+      Predicate:
+        Logical: AND
+        Conditions:
+          - CrawlerName: !Ref CountyPopulation
+            CrawlState: SUCCEEDED
+            LogicalOperator: EQUALS
+          - CrawlerName: !Ref Countrycode
+            CrawlState: SUCCEEDED
+            LogicalOperator: EQUALS
+          - CrawlerName: !Ref RearcCovid19NytDataInUsaUsCounties
+            CrawlState: SUCCEEDED
+            LogicalOperator: EQUALS
+          - CrawlerName: !Ref RearcCovid19NytDataInUsaUsStates
+            CrawlState: SUCCEEDED
+            LogicalOperator: EQUALS
+          - CrawlerName: !Ref RearcCovid19TestingDataStatesDaily
+            CrawlState: SUCCEEDED
+            LogicalOperator: EQUALS
+          - CrawlerName: !Ref RearcCovid19TestingDataUsDaily
+            CrawlState: SUCCEEDED
+            LogicalOperator: EQUALS
+          - CrawlerName: !Ref RearcCovid19TestingDataUsTotalLatest
+            CrawlState: SUCCEEDED
+            LogicalOperator: EQUALS
+          - CrawlerName: !Ref RearcCovid19WorldCasesDeathsTesting
+            CrawlState: SUCCEEDED
+            LogicalOperator: EQUALS
+          - CrawlerName: !Ref RearcUsaHospitalBeds
+            CrawlState: SUCCEEDED
+            LogicalOperator: EQUALS
+          - CrawlerName: !Ref StateAbv
+            CrawlState: SUCCEEDED
+            LogicalOperator: EQUALS
+
+  TriggerJobAggregateQuarter:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: t_Quarter
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Ref GlueWorkflowName
+      Actions:
+        - JobName: !Ref Covid19AggregatorQuarterly
+      Predicate:
+        Logical: AND
+        Conditions:
+          - CrawlerName: !Ref CountyPopulation
+            CrawlState: SUCCEEDED
+            LogicalOperator: EQUALS
+          - CrawlerName: !Ref Countrycode
+            CrawlState: SUCCEEDED
+            LogicalOperator: EQUALS
+          - CrawlerName: !Ref RearcCovid19NytDataInUsaUsCounties
+            CrawlState: SUCCEEDED
+            LogicalOperator: EQUALS
+          - CrawlerName: !Ref RearcCovid19NytDataInUsaUsStates
+            CrawlState: SUCCEEDED
+            LogicalOperator: EQUALS
+          - CrawlerName: !Ref RearcCovid19TestingDataStatesDaily
+            CrawlState: SUCCEEDED
+            LogicalOperator: EQUALS
+          - CrawlerName: !Ref RearcCovid19TestingDataUsDaily
+            CrawlState: SUCCEEDED
+            LogicalOperator: EQUALS
+          - CrawlerName: !Ref RearcCovid19TestingDataUsTotalLatest
+            CrawlState: SUCCEEDED
+            LogicalOperator: EQUALS
+          - CrawlerName: !Ref RearcCovid19WorldCasesDeathsTesting
+            CrawlState: SUCCEEDED
+            LogicalOperator: EQUALS
+          - CrawlerName: !Ref RearcUsaHospitalBeds
+            CrawlState: SUCCEEDED
+            LogicalOperator: EQUALS
+          - CrawlerName: !Ref StateAbv
+            CrawlState: SUCCEEDED
+            LogicalOperator: EQUALS
+
+  # Glue Jobs
+  Covid19AggregatorMonthly:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: j_Monthly
+      Description: Covid 19 Data Aggregator Monthly
+      MaxRetries: 3
+      Role: !Ref GlueRoleName
+      Command:
+        Name: glueetl
+        PythonVersion: "3"
+        ScriptLocation: !Sub s3://${BucketName}-${AWS::AccountId}-${AWS::Region}/glue-scripts/covid_19_data_aggregator.py
+      GlueVersion: "1.0"
+      ExecutionProperty:
+        MaxConcurrentRuns: 2
+      WorkerType: Standard
+      NumberOfWorkers: 5
+      DefaultArguments:  
+        "--LOG_LEVEL": !Ref GlueJobLogLevel
+        "--PERIOD": MONTHLY
+        "--S3_COUNTRYCODE_PATH": s3://covid19-lake/static-datasets/csv/countrycode
+        "--S3_OUTPUT_BASE_PATH": !Sub s3://${BucketName}-${AWS::AccountId}-${AWS::Region}/covid19
+        "--S3_WORLD_CASES_DEATHS_TESTING_PATH": s3://covid19-lake/rearc-covid-19-world-cases-deaths-testing/csv
+        "--enable-continuous-cloudwatch-log": true
+        "--enable-continuous-log-filter": true
+        "--enable-s3-parquet-optimized-committer": true
+        "--enable-metrics": ""
+        "--encryption-type": sse-s3
+        "--job-bookmark-option": job-bookmark-disable
+        "--TempDir": !Sub s3://aws-glue-temporary-${AWS::AccountId}-${AWS::Region}/admin
+
+  Covid19AggregatorQuarterly:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: j_Quarterly
+      Description: Covid 19 Data Aggregator Quarterly
+      MaxRetries: 3
+      Role: !Ref GlueRoleName
+      Command:
+        Name: glueetl
+        PythonVersion: "3"
+        ScriptLocation: !Sub s3://${BucketName}-${AWS::AccountId}-${AWS::Region}/glue-scripts/covid_19_data_aggregator.py
+      GlueVersion: "1.0"
+      ExecutionProperty:
+        MaxConcurrentRuns: 2
+      WorkerType: Standard
+      NumberOfWorkers: 5
+      DefaultArguments:  
+        "--LOG_LEVEL": !Ref GlueJobLogLevel
+        "--PERIOD": QUARTERLY
+        "--S3_COUNTRYCODE_PATH": s3://covid19-lake/static-datasets/csv/countrycode
+        "--S3_OUTPUT_BASE_PATH": !Sub s3://${BucketName}-${AWS::AccountId}-${AWS::Region}/covid19
+        "--S3_WORLD_CASES_DEATHS_TESTING_PATH": s3://covid19-lake/rearc-covid-19-world-cases-deaths-testing/csv
+        "--enable-continuous-cloudwatch-log": true
+        "--enable-continuous-log-filter": true
+        "--enable-s3-parquet-optimized-committer": true
+        "--enable-metrics": ""
+        "--encryption-type": sse-s3
+        "--job-bookmark-option": job-bookmark-disable
+        "--TempDir": !Sub s3://aws-glue-temporary-${AWS::AccountId}-${AWS::Region}/admin
+
+  Covid19WorkflowStarted:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: j_Emit_Started_Event
+      Description: Put event that indicates workflow started (event includes workflow name, run id, and state)
+      MaxRetries: 3
+      Role: !Ref GlueRoleName
+      Command:
+        Name: pythonshell
+        PythonVersion: "3"
+        ScriptLocation: !Sub s3://${BucketName}-${AWS::AccountId}-${AWS::Region}/glue-scripts/emit_started_event.py
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      DefaultArguments:
+        "--LOG_LEVEL": !Ref GlueJobLogLevel
+        "--enable-continuous-cloudwatch-log": "true"
+        "--enable-continuous-log-filter": "false"
+        "--job-bookmark-option": "job-bookmark-disable"
+
+  Covid19WorkflowEnded:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: j_Emit_Ended_Event
+      Description: Put event that indicates workflow ended (event includes workflow name, run id, and state)
+      MaxRetries: 3
+      Role: !Ref GlueRoleName
+      Command:
+        Name: pythonshell
+        PythonVersion: "3"
+        ScriptLocation: !Sub s3://${BucketName}-${AWS::AccountId}-${AWS::Region}/glue-scripts/emit_ended_event.py
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      DefaultArguments:
+        "--LOG_LEVEL": !Ref GlueJobLogLevel
+        "--enable-continuous-cloudwatch-log": "true"
+        "--enable-continuous-log-filter": "false"
+        "--job-bookmark-option": "job-bookmark-disable"
+
+  # Glue Crawlers
+  Covid19Aggregated:
+    Type: AWS::Glue::Crawler
+    DependsOn: GlueRole
+    Properties:
+      Name: c_aggregated
+      Description: !Sub Crawl aggregated datasets at s3://${Covid19Bucket}/covid19/world-cases-deaths-aggregates/
+      DatabaseName: !Ref GlueDatabaseName
+      Role: !Ref GlueRoleName
+      SchemaChangePolicy:
+        DeleteBehavior: DELETE_FROM_DATABASE
+        UpdateBehavior: UPDATE_IN_DATABASE
+      Targets:
+        S3Targets:
+          - Path: !Sub s3://${BucketName}-${AWS::AccountId}-${AWS::Region}/covid19/world-cases-deaths-aggregates/
+
+  CountyPopulation:
+    Type: AWS::Glue::Crawler
+    DependsOn: GlueRole
+    Properties:
+      Name: c_CountyPopulation
+      Description: Crawl datasets in https://registry.opendata.aws/aws-covid19-lake/ available at s3://covid19-lake/static-datasets/csv/CountyPopulation/
+      DatabaseName: !Ref GlueDatabaseName
+      Role: !Ref GlueRoleName
+      SchemaChangePolicy:
+        DeleteBehavior: DELETE_FROM_DATABASE
+        UpdateBehavior: UPDATE_IN_DATABASE
+      Targets:
+        S3Targets:
+          - Path: s3://covid19-lake/static-datasets/csv/CountyPopulation/
+
+  Countrycode:
+    Type: AWS::Glue::Crawler
+    DependsOn: GlueRole
+    Properties:
+      Name: c_countrycode
+      Description: Crawl datasets in https://registry.opendata.aws/aws-covid19-lake/ available at s3://covid19-lake/static-datasets/csv/countrycode/
+      DatabaseName: !Ref GlueDatabaseName
+      Role: !Ref GlueRoleName
+      SchemaChangePolicy:
+        DeleteBehavior: DELETE_FROM_DATABASE
+        UpdateBehavior: UPDATE_IN_DATABASE
+      Targets:
+        S3Targets:
+          - Path: s3://covid19-lake/static-datasets/csv/countrycode/
+
+  RearcCovid19NytDataInUsaUsCounties:
+    Type: AWS::Glue::Crawler
+    DependsOn: GlueRole
+    Properties:
+      Name: c_rearc-covid-19-nyt-data-in-usa-us-counties
+      Description: Crawl datasets in https://registry.opendata.aws/aws-covid19-lake/ available at s3://covid19-lake/rearc-covid-19-nyt-data-in-usa/csv/us-counties/
+      DatabaseName: !Ref GlueDatabaseName
+      Role: !Ref GlueRoleName
+      TablePrefix: rearc_covid_19_nyt_data_in_usa_
+      SchemaChangePolicy:
+        DeleteBehavior: DELETE_FROM_DATABASE
+        UpdateBehavior: UPDATE_IN_DATABASE
+      Targets:
+        S3Targets:
+          - Path: s3://covid19-lake/rearc-covid-19-nyt-data-in-usa/csv/us-counties/
+
+  RearcCovid19NytDataInUsaUsStates:
+    Type: AWS::Glue::Crawler
+    DependsOn: GlueRole
+    Properties:
+      Name: c_rearc-covid-19-nyt-data-in-usa-us-states
+      Description: Crawl datasets in https://registry.opendata.aws/aws-covid19-lake/ available at s3://covid19-lake/rearc-covid-19-nyt-data-in-usa/csv/us-states/
+      DatabaseName: !Ref GlueDatabaseName
+      Role: !Ref GlueRoleName
+      TablePrefix: rearc_covid_19_nyt_data_in_usa_
+      SchemaChangePolicy:
+        DeleteBehavior: DELETE_FROM_DATABASE
+        UpdateBehavior: UPDATE_IN_DATABASE
+      Targets:
+        S3Targets:
+          - Path: s3://covid19-lake/rearc-covid-19-nyt-data-in-usa/csv/us-states/
+
+  RearcCovid19TestingDataStatesDaily:
+    Type: AWS::Glue::Crawler
+    DependsOn: GlueRole
+    Properties:
+      Name: c_rearc-covid-19-testing-data-states-daily
+      Description: Crawl datasets in https://registry.opendata.aws/aws-covid19-lake/ available at s3://covid19-lake/rearc-covid-19-testing-data/csv/states_daily/
+      DatabaseName: !Ref GlueDatabaseName
+      Role: !Ref GlueRoleName
+      TablePrefix: rearc_covid_19_testing_data_
+      SchemaChangePolicy:
+        DeleteBehavior: DELETE_FROM_DATABASE
+        UpdateBehavior: UPDATE_IN_DATABASE
+      Targets:
+        S3Targets:
+          - Path: s3://covid19-lake/rearc-covid-19-testing-data/csv/states_daily/
+
+  RearcCovid19TestingDataUsDaily:
+    Type: AWS::Glue::Crawler
+    DependsOn: GlueRole
+    Properties:
+      Name: c_rearc-covid-19-testing-data-us-daily
+      Description: Crawl datasets in https://registry.opendata.aws/aws-covid19-lake/ available at s3://covid19-lake/rearc-covid-19-testing-data/csv/us_daily/
+      DatabaseName: !Ref GlueDatabaseName
+      Role: !Ref GlueRoleName
+      TablePrefix: rearc_covid_19_testing_data_
+      SchemaChangePolicy:
+        DeleteBehavior: DELETE_FROM_DATABASE
+        UpdateBehavior: UPDATE_IN_DATABASE
+      Targets:
+        S3Targets:
+          - Path: s3://covid19-lake/rearc-covid-19-testing-data/csv/us_daily/
+
+  RearcCovid19TestingDataUsTotalLatest:
+    Type: AWS::Glue::Crawler
+    DependsOn: GlueRole
+    Properties:
+      Name: c_rearc-covid-19-testing-data-us-total-latest
+      Description: Crawl datasets in https://registry.opendata.aws/aws-covid19-lake/ available at s3://covid19-lake/rearc-covid-19-testing-data/csv/us-total-latest/
+      DatabaseName: !Ref GlueDatabaseName
+      Role: !Ref GlueRoleName
+      TablePrefix: rearc_covid_19_testing_data_
+      SchemaChangePolicy:
+        DeleteBehavior: DELETE_FROM_DATABASE
+        UpdateBehavior: UPDATE_IN_DATABASE
+      Targets:
+        S3Targets:
+          - Path: s3://covid19-lake/rearc-covid-19-testing-data/csv/us-total-latest/
+
+  RearcCovid19WorldCasesDeathsTesting:
+    Type: AWS::Glue::Crawler
+    DependsOn: GlueRole
+    Properties:
+      Name: c_rearc-covid-19-world-cases-deaths-testing
+      Description: Crawl datasets in https://registry.opendata.aws/aws-covid19-lake/ available at s3://covid19-lake/rearc-covid-19-world-cases-deaths-testing/
+      DatabaseName: !Ref GlueDatabaseName
+      Role: !Ref GlueRoleName
+      SchemaChangePolicy:
+        DeleteBehavior: DELETE_FROM_DATABASE
+        UpdateBehavior: UPDATE_IN_DATABASE
+      Targets:
+        S3Targets:
+          - 
+            Exclusions:
+              - "**json**"
+            Path: s3://covid19-lake/rearc-covid-19-world-cases-deaths-testing/
+
+  RearcUsaHospitalBeds:
+    Type: AWS::Glue::Crawler
+    DependsOn: GlueRole
+    Properties:
+      Name: c_rearc-usa-hospital-beds
+      Description: Crawl datasets in https://registry.opendata.aws/aws-covid19-lake/ available at s3://covid19-lake/rearc-usa-hospital-beds/
+      DatabaseName: !Ref GlueDatabaseName
+      Role: !Ref GlueRoleName
+      SchemaChangePolicy:
+        DeleteBehavior: DELETE_FROM_DATABASE
+        UpdateBehavior: UPDATE_IN_DATABASE
+      Targets:
+        S3Targets:
+          - Path: s3://covid19-lake/rearc-usa-hospital-beds/
+
+  StateAbv:
+    Type: AWS::Glue::Crawler
+    DependsOn: GlueRole
+    Properties:
+      Name: c_state-abv
+      Description: Crawl datasets in https://registry.opendata.aws/aws-covid19-lake/ available at s3://covid19-lake/static-datasets/json/state-abv/
+      DatabaseName: !Ref GlueDatabaseName
+      Role: !Ref GlueRoleName
+      SchemaChangePolicy:
+        DeleteBehavior: DELETE_FROM_DATABASE
+        UpdateBehavior: UPDATE_IN_DATABASE
+      Targets:
+        S3Targets:
+          - Path: s3://covid19-lake/static-datasets/json/state-abv/
+
+  # S3 Bucket & Policy
+  Covid19Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${BucketName}-${AWS::AccountId}-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+          BlockPublicAcls: TRUE
+          BlockPublicPolicy: TRUE
+          IgnorePublicAcls: TRUE
+          RestrictPublicBuckets: TRUE
+
+  Covid19BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref Covid19Bucket
+      PolicyDocument:
+        Statement:
+          - Sid: DenyInsecureConnections
+            Action:
+              - s3:*
+            Effect: Deny
+            Resource:
+              - !Sub arn:aws:s3:::${BucketName}-${AWS::AccountId}-${AWS::Region}
+              - !Sub arn:aws:s3:::${BucketName}-${AWS::AccountId}-${AWS::Region}/*
+            Principal: "*"
+            Condition:
+                Bool:
+                  aws:SecureTransport: false
+
+  # Glue Database
+  Covid19Database:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Sub ${AWS::AccountId}
+      DatabaseInput:
+        Name: !Sub ${GlueDatabaseName}
+
+  # IAM Role & Policies
+  GlueRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: AWS IAM role for AWS Glue resources
+      RoleName: !Ref GlueRoleName 
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - glue.amazonaws.com
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      Policies:
+        - PolicyName: ReadFromSpecifiedPublicS3Bucket
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetObject
+                Resource:
+                  - arn:aws:s3:::covid19-lake/*
+        - PolicyName: ReadAndWriteFromSpecifiedPrivateS3Bucket
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:List*
+                  - s3:Head*
+                  - s3:Get*
+                  - s3:Put*
+                Resource: !Sub arn:aws:s3:::${BucketName}-${AWS::AccountId}-${AWS::Region}
+              - Effect: Allow
+                Action:
+                  - s3:List*
+                  - s3:Head*
+                  - s3:GetObject*
+                  - s3:PutObject*
+                  - s3:DeleteObject*
+                Resource: !Sub arn:aws:s3:::${BucketName}-${AWS::AccountId}-${AWS::Region}/*
+        - PolicyName: AccessGlueDatabase
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement: 
+              - Effect: Allow
+                Action:
+                  - glue:Update*
+                  - glue:Create*
+                  - glue:Import*
+                Resource: !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/${GlueDatabaseName}
+        - PolicyName: AccessGlueTable
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement: 
+              - Effect: Allow
+                Action:
+                  - glue:Update*
+                  - glue:Create*
+                  - glue:Import*
+                Resource: !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/${GlueDatabaseName}/*
+        - PolicyName: AccessAthenaPrimaryWorkGroup
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement: 
+              - Effect: Allow
+                Action:
+                  - athena:GetWorkGroup
+                  - athena:CreateWorkGroup
+                  - athena:UpdateWorkGroup
+                  - athena:StartQueryExecution
+                  - athena:GetQueryExecution
+                  - athena:GetQueryResults
+                Resource: !Sub arn:aws:athena:${AWS::Region}:${AWS::AccountId}:workgroup/primary
+        - PolicyName: PutEventsIntoDefaultEventBus
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - events:PutEvents
+                Resource: !Sub arn:aws:events:${AWS::Region}:${AWS::AccountId}:event-bus/default
+        - PolicyName: PublishSNS
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:*
+        - PolicyName: AccessGlueCWLogs
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws-glue/jobs/logs-v2:*
