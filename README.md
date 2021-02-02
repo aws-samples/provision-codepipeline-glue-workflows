@@ -49,10 +49,21 @@ AWS CLI command to copy python scripts to bucket/glue-scripts:
 aws s3 cp src s3://covid19-dataset-<AWS_ACCOUNT_ID>-<AWS_REGION>/glue-scripts/ --recursive
 ```
 
+## Running the workflow
+
+The workflow runs automatically at 8:00 AM UTC. To start the workflow manually, you can use either the AWS CLI or the AWS Glue console.
+
 AWS CLI command to start glue workflow:
 ```
 aws glue start-workflow-run --name Covid_19 --region <AWS_REGION>
 ```
+
+To start the workflow on the AWS Glue console, on the Workflows page, select your workflow and choose Run on the Actions menu.
+![Alt text](images/workflow_run_console.png?raw=true "Glue console run workflow")
+
+
+The following screenshot shows a visual representation of the workflow as a graph with your run details.
+![Alt text](images/workflow_visualiztion_and_details.png?raw=true "AWS Glue console displaying details of successful workflow run")
 
 ## Interested in Contributing?
 
