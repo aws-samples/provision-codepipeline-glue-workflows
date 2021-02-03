@@ -1,11 +1,3 @@
-# Any code, applications, scripts, templates, proofs of concept, documentation
-# and other items provided by AWS under this SOW are "AWS Content," as defined
-# in the Agreement, and are provided for illustration purposes only. All such
-# AWS Content is provided solely at the option of AWS, and is subject to the terms
-# of the Addendum and the Agreement. Customer is solely responsible for using,
-# deploying, testing, and supporting any code and applications provided by AWS
-# under this SOW.
-
 import sys
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -36,7 +28,7 @@ def get_first_day_of_the_quarter(run_date):
     quarter = get_quarter(run_date)
     return datetime(run_date.year, 3 * quarter - 2, 1)
 
-# Function compute start and end date for Daily, Monthly and Quarterly runs
+# Function to compute start and end date for Daily, Monthly and Quarterly runs
 def get_start_end_dates(run_date, period):
     # Process Date
     one_day_before_run_date = run_date - timedelta(days=1)
@@ -66,14 +58,13 @@ def get_start_end_dates(run_date, period):
 
     return cfg
 
-# Create CloudWatch Data frame
+# Create Data frame
 def create_df(spark, s3_path):
     # Read the csv formatted S3 files
     df = spark.read.format("csv").option("inferSchema", "true").option("header", "true").load(s3_path)
 
     return df
     
-# Funtion Main
 
 # Read parameters
 args = getResolvedOptions(sys.argv, ['LOG_LEVEL', 'PERIOD', 'S3_WORLD_CASES_DEATHS_TESTING_PATH', 'S3_COUNTRYCODE_PATH','S3_OUTPUT_BASE_PATH'])
@@ -89,7 +80,7 @@ s3_output_base_path = args['S3_OUTPUT_BASE_PATH']
 logger = setup_logger(log_level)
 logger = logging.getLogger(__name__)
 
-# Log parameters
+# Log Parameters
 logger.info(f"log_level : {log_level}")
 logger.info(f"period : {period}")
 logger.info(f"s3_world_cases_deaths_testing_path : {s3_world_cases_deaths_testing_path}")
