@@ -279,6 +279,8 @@ Resources:
   CodePipelineArtifactStoreBucket:
     Type: AWS::S3::Bucket
     Properties:
+      VersioningConfiguration:
+        Status: Enabled
       BucketName: !Sub ${CodePipelineArtifactStoreBucketName}-${AWS::AccountId}-${AWS::Region}
       BucketEncryption:
         ServerSideEncryptionConfiguration:
@@ -311,6 +313,8 @@ Resources:
   CloudTrailLogsBucket:
     Type: AWS::S3::Bucket
     Properties:
+      VersioningConfiguration:
+        Status: Enabled
       BucketName: !Sub ${CloudTrailLogsBucketName}-${AWS::AccountId}-${AWS::Region}
       BucketEncryption:
         ServerSideEncryptionConfiguration:
